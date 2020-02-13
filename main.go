@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	skynet "github.com/NebulousLabs/go-skynet"
@@ -23,6 +24,7 @@ import (
 type Page struct {
 	Title string
 	Body  []byte
+	Notes []string
 }
 
 type SkyNote struct {
@@ -85,7 +87,6 @@ func loadPage(title string) (*Page, error) {
 	filename := filepath.Join("pages", title+".txt")
 	skylink, ok := ss.skynotes[filename]
 	if !ok {
-		log.Println("Trying to load non existent file, this shouldn't happen")
 		return nil, errors.New("note not being tracked")
 	}
 	err := skynet.DownloadFile(filename, skylink, skynet.DefaultDownloadOptions)
@@ -98,6 +99,17 @@ func loadPage(title string) (*Page, error) {
 		return nil, err
 	}
 	return &Page{Title: title, Body: body}, nil
+}
+
+func skynotesHandler(w http.ResponseWriter, r *http.Request) {
+	// Load current notes
+	var notes []string
+	for note := range ss.skynotes {
+		filename := filepath.Base(note)
+		title := strings.TrimSuffix(filename, ".txt")
+		notes = append(notes, title)
+	}
+	renderTemplate(w, "skynotes", &Page{Notes: notes})
 }
 
 func viewHandler(w http.ResponseWriter, r *http.Request, title string) {
@@ -128,7 +140,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request, title string) {
 	http.Redirect(w, r, "/view/"+title, http.StatusFound)
 }
 
-var templates = template.Must(template.ParseFiles("edit.html", "view.html"))
+var templates = template.Must(template.ParseFiles("edit.html", "view.html", "skynotes.html"))
 
 func renderTemplate(w http.ResponseWriter, tmpl string, p *Page) {
 	err := templates.ExecuteTemplate(w, tmpl+".html", p)
@@ -137,7 +149,7 @@ func renderTemplate(w http.ResponseWriter, tmpl string, p *Page) {
 	}
 }
 
-var validPath = regexp.MustCompile("^/(edit|save|view)/([a-zA-Z0-9]+)$")
+var validPath = regexp.MustCompile("^/(edit|save|view|skynotes)/([a-zA-Z0-9]+)$")
 
 func makeHandler(fn func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -155,6 +167,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	http.HandleFunc("/", skynotesHandler)
 	http.HandleFunc("/view/", makeHandler(viewHandler))
 	http.HandleFunc("/edit/", makeHandler(editHandler))
 	http.HandleFunc("/save/", makeHandler(saveHandler))

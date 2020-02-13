@@ -25,6 +25,8 @@ type (
 		SkyLink  string `json:"skylink"`
 		Filename string `json:"filename"`
 	}
+
+	// persistedLink is the persisted link information that is stored on disk
 	persistedLink struct {
 		Timestamp int64  `json:"timestamp"`
 		SkyLink   string `json:"skylink"`

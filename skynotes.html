@@ -1,0 +1,13 @@
+<h1>Welcome to SkyNotes</h1>
+
+
+{{ if .Notes }}
+<!-- check for any notes -->
+<h3>Here are a list of your Current SkyNotes</h3>
+{{ range $note := .Notes }}
+    <a href="/view/{{$note}}">{{$note}}</a>
+	</br>
+{{ end }}
+{{ end }}
+
+<p>[<a href="/edit/NewNote">Create a NewNote</a>]</p>
