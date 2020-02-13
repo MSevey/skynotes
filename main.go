@@ -5,122 +5,37 @@
 package main
 
 import (
-	"bytes"
-	"errors"
-	"fmt"
 	"html/template"
-	"io/ioutil"
 	"log"
 	"net/http"
-	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
-	"time"
-
-	skynet "github.com/NebulousLabs/go-skynet"
 )
 
-type Page struct {
-	Title string
-	Body  []byte
-	Notes []string
-}
-
+// SkyNote tracks the information related to the notes stored on skynet
 type SkyNote struct {
 	// filename to skylink
 	skynotes map[string]string
 
-	// skylink to unix timestampe
+	// skylink to unix timestamp
 	skylinks map[string]int64
 }
 
-var ss = &SkyNote{
-	skynotes: make(map[string]string),
-	skylinks: make(map[string]int64),
-}
-
-func (p *Page) save() error {
-	filename := filepath.Join("pages", p.Title+".txt")
-	err := ioutil.WriteFile(filename, p.Body, 0600)
-	if err != nil {
-		log.Println("Error writing file:", err)
-		return err
-	}
-	// Check if current skylink renders the same content
-	skylink, ok := ss.skynotes[filename]
-	if ok {
-		copyFile := fmt.Sprintf("%v_copy", filename)
-		err = skynet.DownloadFile(copyFile, skylink, skynet.DefaultDownloadOptions)
-		if err != nil {
-			log.Println("Error downloading file from skynet:", err)
-			return err
-		}
-		// Clean up downloaded file
-		defer os.Remove(copyFile)
-
-		body, err := ioutil.ReadFile(copyFile)
-		if err != nil {
-			log.Println("Error reading file from disk:", err)
-			return err
-		}
-		if bytes.Equal(body, p.Body) {
-			// File hasn't changed, return
-			return nil
-		}
+var (
+	// Initialize SkyNote
+	ss = &SkyNote{
+		skynotes: make(map[string]string),
+		skylinks: make(map[string]int64),
 	}
 
-	// Upload new file
-	skylink, err = skynet.UploadFile(filename, skynet.DefaultUploadOptions)
-	if err != nil {
-		log.Println("Error saving file to skynet:", err)
-		return err
-	}
-	// Add to maps
-	ss.skynotes[filename] = skylink
-	ss.skylinks[skylink] = time.Now().Unix()
-	fmt.Println("skylink", skylink)
-	return ss.save()
-}
+	// List of accepted templates
+	templates = template.Must(template.ParseFiles("edit.html", "view.html", "skynotes.html"))
 
-func loadPage(title string) (*Page, error) {
-	filename := filepath.Join("pages", title+".txt")
-	skylink, ok := ss.skynotes[filename]
-	if !ok {
-		return nil, errors.New("note not being tracked")
-	}
-	err := skynet.DownloadFile(filename, skylink, skynet.DefaultDownloadOptions)
-	if err != nil {
-		log.Println("Error downloading file from skynet:", err)
-		return nil, err
-	}
-	body, err := ioutil.ReadFile(filename)
-	if err != nil {
-		return nil, err
-	}
-	return &Page{Title: title, Body: body}, nil
-}
+	// validPath validates the url paths
+	validPath = regexp.MustCompile("^/(edit|save|view)/([a-zA-Z0-9]+)$")
+)
 
-func skynotesHandler(w http.ResponseWriter, r *http.Request) {
-	// Load current notes
-	var notes []string
-	for note := range ss.skynotes {
-		filename := filepath.Base(note)
-		title := strings.TrimSuffix(filename, ".txt")
-		notes = append(notes, title)
-	}
-	renderTemplate(w, "skynotes", &Page{Notes: notes})
-}
-
-func viewHandler(w http.ResponseWriter, r *http.Request, title string) {
-	p, err := loadPage(title)
-	if err != nil {
-		http.Redirect(w, r, "/edit/"+title, http.StatusFound)
-		return
-	}
-	renderTemplate(w, "view", p)
-}
-
+// editHandler handles the events for /edit
 func editHandler(w http.ResponseWriter, r *http.Request, title string) {
 	p, err := loadPage(title)
 	if err != nil {
@@ -129,6 +44,7 @@ func editHandler(w http.ResponseWriter, r *http.Request, title string) {
 	renderTemplate(w, "edit", p)
 }
 
+// saveHandler handles the events for /save
 func saveHandler(w http.ResponseWriter, r *http.Request, title string) {
 	body := r.FormValue("body")
 	p := &Page{Title: title, Body: []byte(body)}
@@ -140,8 +56,28 @@ func saveHandler(w http.ResponseWriter, r *http.Request, title string) {
 	http.Redirect(w, r, "/view/"+title, http.StatusFound)
 }
 
-var templates = template.Must(template.ParseFiles("edit.html", "view.html", "skynotes.html"))
+// skynoteHandler handles the events for /
+func skynotesHandler(w http.ResponseWriter, r *http.Request) {
+	// Load current notes
+	var notes []string
+	for note := range ss.skynotes {
+		title := filepath.Base(note)
+		notes = append(notes, title)
+	}
+	renderTemplate(w, "skynotes", &Page{Notes: notes})
+}
 
+// viewHandler handles the events for /view
+func viewHandler(w http.ResponseWriter, r *http.Request, title string) {
+	p, err := loadPage(title)
+	if err != nil {
+		http.Redirect(w, r, "/edit/"+title, http.StatusFound)
+		return
+	}
+	renderTemplate(w, "view", p)
+}
+
+// renderTemplate renders the template for the provided tmpl string
 func renderTemplate(w http.ResponseWriter, tmpl string, p *Page) {
 	err := templates.ExecuteTemplate(w, tmpl+".html", p)
 	if err != nil {
@@ -149,8 +85,7 @@ func renderTemplate(w http.ResponseWriter, tmpl string, p *Page) {
 	}
 }
 
-var validPath = regexp.MustCompile("^/(edit|save|view|skynotes)/([a-zA-Z0-9]+)$")
-
+// makeHandler makes the handler functions
 func makeHandler(fn func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		m := validPath.FindStringSubmatch(r.URL.Path)
@@ -163,14 +98,18 @@ func makeHandler(fn func(http.ResponseWriter, *http.Request, string)) http.Handl
 }
 
 func main() {
+	// Try and load any persisted state for the SkyNotes
 	err := ss.load()
 	if err != nil {
 		panic(err)
 	}
+
+	// Initialize the handles
 	http.HandleFunc("/", skynotesHandler)
 	http.HandleFunc("/view/", makeHandler(viewHandler))
 	http.HandleFunc("/edit/", makeHandler(editHandler))
 	http.HandleFunc("/save/", makeHandler(saveHandler))
 
+	// Launch the Server
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
