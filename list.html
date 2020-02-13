@@ -1,0 +1,18 @@
+<h1>Pages</h1>
+
+<form action="/view/{{.Title}}" method="GET">
+<div><textarea name="body" rows="20" cols="80">{{printf "%s" .Body}}</textarea></div>
+<div><input type="submit" value="Save"></div>
+</form>
+
+
+{{ if .Pages }}
+{{ range $page := .Pages }}
+    <a href="/view/{{.page}}">{{$page}}</a>
+	</br>
+{{ end }}
+{{ end }}
+
+{{ if .Empty }}
+<p>{{ .Empty }}</p>
+{{ end }}
